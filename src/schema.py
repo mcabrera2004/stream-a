@@ -14,6 +14,8 @@ class AgentState(TypedDict):
     raw_news: List[dict]
     competitor_mentions: List[str]
     generated_angles: List[StoryAngle]
+    feedback: str
+    iteration: int
 
 class StoryAngles(BaseModel):
     angles: List[StoryAngle] = Field(description="List of strategic PR story angles.")

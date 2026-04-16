@@ -1,8 +1,8 @@
 import os
 import streamlit as st
 from dotenv import load_dotenv
-from .agent import agent_app
-from .schema import StoryAngle
+from src.agent import agent_app
+from src.schema import StoryAngle
 
 load_dotenv()
 
@@ -11,23 +11,16 @@ st.set_page_config(page_title="Volta PR Story Agent", layout="wide", page_icon="
 st.title("⚡ Volta AI Story Angle Generator")
 st.markdown("Generate 3-5 strategic PR story angles from the latest EV charging industry news.")
 
-with st.sidebar:
-    st.header("🔑 API Keys")
-    google_key = st.text_input("GOOGLE_API_KEY", type="password", value=os.getenv("GOOGLE_API_KEY", ""))
-    tavily_key = st.text_input("TAVILY_API_KEY", type="password", value=os.getenv("TAVILY_API_KEY", ""))
-    
-    st.markdown("---")
-    st.markdown("### ⚙️ Settings")
-    query_input = st.text_input("Query", "EV charging network industry news")
-    
-if google_key:
-    os.environ["GOOGLE_API_KEY"] = google_key
-if tavily_key:
-    os.environ["TAVILY_API_KEY"] = tavily_key
+google_key = os.getenv("GOOGLE_API_KEY")
+tavily_key = os.getenv("TAVILY_API_KEY")
 
-if st.button("🚀 Scout News & Generate Angles", use_container_width=True):
+with st.sidebar:
+    st.header("Settings")
+    query_input = st.text_input("Query", "EV charging network industry news")
+
+if st.button("Scout News & Generate Angles", use_container_width=True):
     if not google_key or not tavily_key:
-        st.error("Please provide both Google and Tavily API keys in the sidebar.")
+        st.error("Please provide both GOOGLE_API_KEY and TAVILY_API_KEY in your .env file.")
     else:
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -50,18 +43,34 @@ if st.button("🚀 Scout News & Generate Angles", use_container_width=True):
                     
                 if "fetch" in s:
                     status_text.info("News fetched. Analyzing competitors...")
-                    progress_bar.progress(33)
+                    progress_bar.progress(25)
                 elif "analyze" in s:
-                    status_text.info("Competitors analyzed. Generating angles with Gemini...")
-                    progress_bar.progress(66)
+                    status_text.info("Competitors analyzed. Generating initial angles...")
+                    progress_bar.progress(50)
                 elif "generate" in s:
-                    status_text.success("PR Angles Generated Successfully!")
-                    progress_bar.progress(100)
+                    status_text.info("Angles generated! Waiting for PR Director review...")
+                    progress_bar.progress(75)
+                elif "reviewer" in s:
+                    feedback = s["reviewer"].get("feedback", "")
+                    if feedback == "PASS":
+                        status_text.success("PR Angles Approved by Director! 🎉")
+                        progress_bar.progress(100)
+                    else:
+                        iter_num = final_state.get('iteration', 1)
+                        status_text.warning(f"PR Director rejected (Attempt {iter_num}). Regenerating fixes... 🔄")
+            
+            # Final UI cleanup after loop
+            if final_state.get("feedback") == "PASS":
+                status_text.success("PR Angles Approved by Director!")
+                progress_bar.progress(100)
+            elif final_state.get("iteration", 0) >= 3:
+                status_text.error("PR Director still has concerns, but showing best-effort results (Max attempts reached).")
+                progress_bar.progress(100)
             
             if not final_state:
                 st.error("Agent failed to return a valid state.")
             else:
-                st.markdown("### 📰 Tavily Search References")
+                st.markdown("### Search References")
                 if final_state.get("raw_news"):
                     import re
                     for article in final_state.get("raw_news"):
@@ -76,7 +85,7 @@ if st.button("🚀 Scout News & Generate Angles", use_container_width=True):
                 else:
                     st.write("No news found or Tavily returned empty.")
                     
-                st.markdown("### 🎯 Generated PR Angles")
+                st.markdown("### Generated PR Angles")
                 angles = final_state.get("generated_angles", [])
                 
                 mention_text = ", ".join(final_state.get('competitor_mentions', [])) if final_state.get('competitor_mentions') else 'None'
