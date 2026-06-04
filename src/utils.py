@@ -1,122 +1,231 @@
-from langchain_core.prompts import PromptTemplate
+"""
+Prompts, parsers de JSON y logging del ÁGORA.
 
-# Prompt for the "Strategist" - ALIGNED WITH PROJECT BRIEF
-STORY_ANGLE_SYSTEM_PROMPT = """You are a Senior PR Director at Moburst. 
-Your goal is to generate 3-5 strategic story angles for 'Volta' (EV charging network) that will WOW the client.
+El logging es deliberadamente legible: imprime el intercambio entre agentes
+como un diálogo, que es justo lo que pide el challenge (trazabilidad del
+intercambio de mensajes).
+"""
+from __future__ import annotations
 
-KEY COMPETITORS: ChargePoint, EVgo, Blink Charging. (Contrast Volta against these specifically).
+import json
+import re
+from typing import List
 
-TARGET MEDIA (Mix these up):
-- Trade: Electrek, Green Car Reports
-- Consumer/Tech: TechCrunch, The Verge
-- Business: Bloomberg, WSJ
-- General: Local/Regional news
 
-STORY CATEGORIES (Required Mix):
-1. Infrastructure/Policy (e.g., charging deserts, inequality)
-2. Technical/Industry (e.g., grid strain, hardware standards)
-3. Lifestyle/Consumer (e.g., the 'third place', daily rituals)
+# ---------------------------------------------------------------------------
+# Logging / trazabilidad
+# ---------------------------------------------------------------------------
+
+def log(emoji: str, stage: str, message: str) -> None:
+    """Traza una transición del grafo de forma legible en consola."""
+    print(f"{emoji} [{stage}] {message}", flush=True)
+
+
+def sentiment_bar(value: float) -> str:
+    """Representa un sentimiento (-1..1) como una etiqueta + signo legible."""
+    sign = "🟢" if value > 0.15 else ("🔴" if value < -0.15 else "🟡")
+    return f"{sign}{value:+.2f}"
+
+
+# ---------------------------------------------------------------------------
+# Prompts
+# ---------------------------------------------------------------------------
+
+PERSONA_FACTORY_PROMPT = """Sos un diseñador de simulaciones sociales (estilo "swarm intelligence").
+A partir de un TEMA y CONTEXTO real, encarnás un panel realista de personas que representan
+distintos segmentos de la opinión pública.
+
+Te doy una lista de ARQUETIPOS pre-asignados (uno por persona). Para CADA arquetipo, en el
+mismo orden, creás una persona concreta y creíble que encaje con ese rol y con el rango de
+opinión indicado. Esto garantiza un panel diverso y con tensión real.
+
+REGLAS:
+1. RESPETÁ el arquetipo y su rango de stance (la opinión inicial, de -1 a +1).
+2. REALISMO: nombre, profesión y trasfondo creíbles y variados (género, edad, contexto).
+3. ANCLÁ la persona al TEMA y al CONTEXTO cuando tenga sentido.
 
 ==============================================================================
-CRITICAL RULES:
-==============================================================================
-1. DIVERSITY: Do NOT provide three angles of the same type. Provide a mix (e.g., one Business, one Tech, one Lifestyle).
-2. COMPETITORS: Every angle must contrast Volta against ChargePoint, EVgo, or Blink Charging. 
-3. FRESHNESS: Use news from the PAST 2-4 WEEKS. Reference specific dates (March/April 2026).
-4. BRAND VOICE: Volta is about "Integrated, seamless community charging" (grocery stores, retail centers), NOT highway truck stops.
+TEMA:
+{topic}
 
-==============================================================================
-NEWS TO ANALYZE:
-==============================================================================
-{raw_news}
+CONTEXTO (fuentes reales):
+{context}
 
+ARQUETIPOS A ENCARNAR (en este orden):
+{archetypes}
 ==============================================================================
-COMPETITOR MENTIONS:
-==============================================================================
-{competitor_mentions}
 
-==============================================================================
-OUTPUT FORMAT (STRICT JSON LIST):
-==============================================================================
-Return ONLY a JSON array of objects:
+FORMATO DE SALIDA (SOLO un array JSON de {n} objetos, en el MISMO orden que los arquetipos):
 [
-    {{
-        "headline": "Conflict-driven title",
-        "rationale": "On [Date], [Source] reported [Fact]. While [Competitor] does X, Volta does Y...",
-        "outlet_specific": "Name of specific publication from brief",
-        "outlet_category": "trade_press | consumer_tech | business_press | local_news | lifestyle | clean_tech",
-        "why_now": "Timeline justification",
-        "source_urls": ["url1"]
-    }}
+  {{
+    "name": "Nombre Apellido",
+    "profession": "profesión",
+    "backstory": "1-2 frases que dan voz y contexto",
+    "stance": -0.6
+  }}
 ]
 """
 
-# Función para crear el prompt template
-def create_story_angle_prompt():
-    return PromptTemplate(
-        input_variables=["raw_news", "competitor_mentions"],
-        template=STORY_ANGLE_SYSTEM_PROMPT
-    )
 
-# Función para parsear la respuesta (espera JSON)
-def parse_angles_response(response_text: str) -> list:
-    """Extrae y valida los ángulos de la respuesta del LLM"""
-    import json
-    import re
-    
-    # Limpiar la respuesta - remover posibles markdown code blocks
-    cleaned = response_text.strip()
+REACTION_PROMPT = """Sos {name}, {profession}. Arquetipo: {archetype}.
+Trasfondo: {backstory}
+Tu opinión actual sobre el tema (de -1 a +1): {stance}.
+Tu volatilidad (qué tan fácil cambiás de opinión): {volatility}.
+
+Estás en una red social discutiendo este TEMA:
+"{topic}"
+
+CONTEXTO de la noticia:
+{context}
+
+FEED de la conversación hasta ahora (posts de otras personas; puede estar vacío en la ronda 1):
+{feed}
+{intervention_block}
+TU TAREA:
+Escribí UN post corto (máx 40 palabras), en primera persona, con tu voz característica.
+- Si hay posts en el feed, RESPONDÉ a alguno mencionando a esa persona por nombre cuando tenga sentido.
+- Dejá que tu volatilidad influya: si es alta, podés moverte hacia los argumentos que leíste; si es baja, mantené tu postura.
+- Reportá tu sentimiento ACTUALIZADO hacia el tema tras leer el feed, de -1 a +1.
+
+FORMATO DE SALIDA (SOLO un objeto JSON, sin texto extra):
+{{"text": "tu post", "sentiment": 0.2}}
+"""
+
+
+INTERVENTION_BLOCK = """
+⚡ INTERVENCIÓN / ANUNCIO NUEVO que acabás de ver (reaccioná teniéndolo en cuenta;
+puede cambiar o reforzar tu postura según tu volatilidad):
+"{intervention}"
+"""
+
+STRATEGIST_PROMPT = """Sos un estratega de comunicación. Acabás de observar una simulación de cómo
+reacciona el público ante un TEMA. El debate convergió con cierto sentimiento y dejó al descubierto
+las OBJECIONES principales. Tu trabajo es proponer {k} intervenciones DISTINTAS (mensajes, anuncios
+o ajustes de política) que podrían MEJORAR la recepción, atacando esas objeciones de raíz.
+
+REGLAS:
+1. Cada intervención debe ser concreta y accionable (algo que de verdad se podría anunciar/hacer).
+2. Cada una debe atacar un ángulo distinto de las objeciones detectadas (no variaciones de lo mismo).
+3. Realista: no prometas magia; abordá la preocupación real que mostró el feed.
+
+TEMA:
+{topic}
+
+MÉTRICAS Y OBJECIONES DE LA SIMULACIÓN BASELINE:
+{analytics}
+
+TRANSCRIPCIÓN (resumen del feed):
+{feed}
+
+FORMATO DE SALIDA (SOLO un array JSON de {k} objetos):
+[
+  {{"name": "etiqueta corta de la intervención", "text": "el anuncio/mensaje concreto, 1-2 frases"}}
+]
+"""
+
+
+REPORT_AGENT_PROMPT = """Sos un analista de simulaciones sociales. Estás observando, con "vista de
+Dios", una SIMULACIÓN del futuro: cómo reaccionaría la gente real ante este tema. El discurso y
+las reacciones de los agentes son un PROXY de comportamiento humano futuro, no opiniones del presente.
+
+REGLAS DE RIGOR:
+- Basá TODAS tus afirmaciones ÚNICAMENTE en los datos de la simulación (feed + métricas).
+  NO uses tu conocimiento general del tema ni inventes hechos que no estén en los datos.
+- Tratá las métricas pre-computadas como evidencia dura; citá nombres de agentes como prueba.
+- Sé predictivo (qué va a pasar), no descriptivo (qué pasó).
+
+TEMA:
+{topic}
+
+PERSONAS QUE PARTICIPARON:
+{personas}
+
+MÉTRICAS PRE-COMPUTADAS DE LA SIMULACIÓN:
+{analytics}
+
+TRANSCRIPCIÓN COMPLETA DEL FEED BASELINE (todas las rondas):
+{feed}
+
+ANÁLISIS CONTRAFÁCTICO (qué pasó al RE-SIMULAR con cada intervención propuesta):
+{comparison}
+
+Generá un reporte en MARKDOWN con EXACTAMENTE estas secciones:
+
+## 🔮 Outcome esperado (status quo)
+(2-3 frases: si no se hace nada, ¿hacia dónde se inclina la opinión? ¿se polariza, converge, se enfría?)
+
+## 📈 Trayectoria del sentimiento
+(interpretá la evolución ronda a ronda del baseline: ¿se movió la aguja? ¿por qué?)
+
+## ⚔️ Bandos emergentes
+(qué facciones se formaron, quién las lidera, qué argumentos las unen)
+
+## 🎯 Influencers clave
+(qué personas movieron la conversación o hicieron cambiar de opinión a otras)
+
+## 🧪 Análisis contrafáctico (qué palanca funciona)
+(comparÁ las intervenciones re-simuladas contra el status quo: cuánto movió cada una el
+sentimiento, a quién convenció, cuál es la GANADORA y por qué. Citá los números del análisis.)
+
+## ⚠️ Riesgos de narrativa / PR
+(qué argumentos o reacciones representan un riesgo si esto fuera real)
+
+## ✅ Recomendación
+(1-2 acciones concretas, fundadas en la intervención ganadora del análisis contrafáctico)
+"""
+
+
+# ---------------------------------------------------------------------------
+# Parsers de JSON (tolerantes a la verborragia del LLM)
+# ---------------------------------------------------------------------------
+
+def _strip_code_fences(text: str) -> str:
+    cleaned = text.strip()
     if cleaned.startswith("```json"):
         cleaned = cleaned[7:]
-    if cleaned.startswith("```"):
+    elif cleaned.startswith("```"):
         cleaned = cleaned[3:]
     if cleaned.endswith("```"):
         cleaned = cleaned[:-3]
-    cleaned = cleaned.strip()
-    
+    return cleaned.strip()
+
+
+def parse_json_array(response_text: str) -> List[dict]:
+    """Extrae un array JSON de la respuesta del LLM (para las personas)."""
+    cleaned = _strip_code_fences(response_text)
     try:
-        angles = json.loads(cleaned)
-        if not isinstance(angles, list):
-            angles = [angles]
-        return angles
+        data = json.loads(cleaned)
+        return data if isinstance(data, list) else [data]
     except json.JSONDecodeError:
-        # Fallback: intentar extraer con regex
-        pattern = r'\{[^{}]*"headline"[^{}]*\}'
-        matches = re.findall(pattern, cleaned, re.DOTALL)
-        angles = []
-        for match in matches:
+        # Fallback: agarrar el primer bloque [...] que encontremos
+        match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+        if match:
             try:
-                angles.append(json.loads(match))
-            except:
-                continue
-        return angles
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+    return []
 
-def get_empty_state() -> dict:
-    return {
-        "query": "",
-        "raw_news": [],
-        "competitor_mentions": [],
-        "generated_angles": [],
-        "feedback": "",
-        "iteration": 0
-    }
 
-REVIEWER_SYSTEM_PROMPT = """You are the PR Director at Moburst.
-Your job is to review the newly generated PR story angles for Volta.
+def parse_json_object(response_text: str) -> dict:
+    """Extrae un objeto JSON de la respuesta del LLM (para una reacción)."""
+    cleaned = _strip_code_fences(response_text)
+    try:
+        data = json.loads(cleaned)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+    return {}
 
-CRITERIA FOR PASSING:
-1. FRESHNESS: Does the angle rely on data/news from before mid-2025? If so, REJECT. It must use 2026 or late 2025 news.
-2. COMPETITORS: Does it contrast Volta against ChargePoint, EVgo, or Blink explicitly? If not, REJECT.
-3. COHERENCE: Does the rationale strongly support the headline? Is the 'Why Now' actually urgent? If not, REJECT.
 
-EVALUATION RULES:
-- If ANY angle fails ANY criteria, you must output a FAIL status and provide harsh, specific feedback on what to fix.
-- If ALL angles are excellent, output PASS.
-
-OUTPUT FORMAT:
-Respond with ONLY a JSON object:
-{{
-    "status": "PASS" | "FAIL",
-    "feedback": "string explaining what needs to be fixed if FAIL"
-}}
-"""
+def clamp(value, low: float = -1.0, high: float = 1.0) -> float:
+    """Acota un valor numérico al rango [low, high]; devuelve 0.0 si no es numérico."""
+    try:
+        return max(low, min(high, float(value)))
+    except (TypeError, ValueError):
+        return 0.0

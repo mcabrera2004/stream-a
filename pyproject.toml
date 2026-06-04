@@ -1,7 +1,7 @@
 [project]
-name = "volta-pr-agent"
+name = "agora"
 version = "0.1.0"
-description = "Volta AI Story Angle Generator (LangGraph + Tavily)"
+description = "ÁGORA — simulación multi-agente de dinámica de opinión (LangGraph + Tavily + Gemini)"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
