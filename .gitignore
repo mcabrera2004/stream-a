@@ -6,3 +6,6 @@ env/
 
 # datos de validación (no se versionan)
 validation/data/
+
+# PDFs
+*.pdf
