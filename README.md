@@ -1,4 +1,4 @@
-# 🏛️ ÁGORA — Simulación multi-agente de dinámica de opinión
+# ÁGORA — Simulación multi-agente de dinámica de opinión
 
 POC de un **flujo agentic multi-agente** construido con **LangGraph**. Un enjambre de
 agentes con perfiles distintos (*personas*) debate un tema durante varias rondas
@@ -107,26 +107,6 @@ uv run python tests/test_offline.py                  # test de orquestación (si
 
 Ver [sample_run.md](sample_run.md) para una corrida real completa.
 
-## Deploy en Streamlit Cloud (opcional)
-
-Además de correr local, la UI se puede desplegar **gratis** en
-[Streamlit Community Cloud](https://share.streamlit.io) desde el repo de GitHub:
-
-1. Conectá el repo y apuntá a `app.py` como archivo principal (usa `requirements.txt`).
-2. En **Settings → Secrets**, cargá las API keys (no van en el código):
-   ```toml
-   GOOGLE_API_KEY = "tu_key"
-   TAVILY_API_KEY = "tu_key"          # opcional (contexto externo)
-   # Observabilidad opcional (LangSmith):
-   LANGSMITH_TRACING = "true"
-   LANGSMITH_API_KEY = "tu_key"
-   LANGSMITH_PROJECT = "agora"
-   ```
-3. (Opcional) En *Advanced settings* elegí Python 3.13.
-
-`app.py` ya copia los secrets a variables de entorno, así que funciona igual en local
-(`.env`) y en la nube (`st.secrets`) sin cambiar código.
-
 ## Trazabilidad (ejemplo de consola)
 
 ```
@@ -166,9 +146,9 @@ No alcanza con que corra: medimos si **sirve** y si **le pega a la realidad**
 
 | Test | Resultado | Qué prueba |
 |---|---|---|
-| 🎯 Placebo | ✅ PASS | La recomendación es significativa (real Δ+0.19 vs placebo ≈0), no ruido. |
-| 🔁 Test-retest | ✅ PASS | Estable: la ganadora no cambia entre corridas (3/3); baseline ±0.05. |
-| 🧠 Validez externa | ✅ 60% vs azar 50% | Predice el ganador de A/B **reales** (Upworthy clicks); 67% en casos claros. |
+|  Placebo | ✅ PASS | La recomendación es significativa (real Δ+0.19 vs placebo ≈0), no ruido. |
+|  Test-retest | ✅ PASS | Estable: la ganadora no cambia entre corridas (3/3); baseline ±0.05. |
+| Validez externa | ✅ 60% vs azar 50% | Predice el ganador de A/B **reales** (Upworthy clicks); 67% en casos claros. |
 
 ÁGORA es una herramienta de **pre-mortem / priorización de mensajes** (cf. Argyle et al.
 2023): su fortaleza está en el ordenamiento relativo de intervenciones y las objeciones que
