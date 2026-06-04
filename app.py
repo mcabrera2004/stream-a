@@ -40,10 +40,12 @@ h1, h2, h3 { color: #0f2747; }
 .agora-hero .tag { color:#e0a106; font-weight:600; margin-top:.2rem; }
 .agora-hero .sub { color:#cdd6e2; font-size:.95rem; margin-top:.5rem; }
 .persona-card { border:1px solid #e6e9ef; border-left:4px solid #1f3a63;
-  border-radius:10px; padding:.7rem .9rem; height:100%; background:#fff; }
+  border-radius:10px; padding:.7rem .9rem; height:100%; background:#fff; color:#0f2747; }
+.persona-card small { color:#475569; }
 .winner-box { background:#fff8e6; border:1px solid #e0a106; border-radius:12px;
-  padding:1rem 1.2rem; }
+  padding:1rem 1.2rem; color:#0f2747; }
 div[data-testid="stMetricValue"] { color:#0f2747; }
+div[data-testid="stMetricLabel"] { color:#475569; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -159,18 +161,26 @@ tab_res, tab_aud, tab_feed, tab_metrics, tab_report = st.tabs(
 
 # ============================== RESULTADO (la respuesta de negocio) ==============
 with tab_res:
-    if cmp:
-        st.markdown(
-            f"<div class='winner-box'><h3 style='margin-top:0'>🏆 Mensaje recomendado: "
-            f"{cmp['winner']}</h3>", unsafe_allow_html=True)
+    if cmp and cmp.get("options"):
         base_avg = cmp["baseline"]["avg_final"]
-        best = cmp["options"][0] if cmp.get("options") else None
+        # opción ganadora (por nombre; fallback a la de mayor efecto)
+        winner = next((o for o in cmp["options"] if o["name"] == cmp["winner"]), cmp["options"][0])
+
+        st.markdown("#### 🏆 Mensaje recomendado — la solución")
+        st.markdown(
+            f"<div class='winner-box'>"
+            f"<div style='font-weight:700;font-size:1.05rem;color:#0f2747;'>{winner['name']}</div>"
+            f"<div style='margin-top:.5rem;font-size:1.05rem;color:#33405a;font-style:italic;'>"
+            f"“{winner['text']}”</div></div>",
+            unsafe_allow_html=True)
+        st.markdown("")
+
         c1, c2, c3 = st.columns(3)
         c1.metric("Status quo (no hacer nada)", f"{base_avg:+.2f}")
-        if best:
-            c2.metric("Con el mejor mensaje", f"{best['avg_final']:+.2f}", f"{best['delta']:+.2f}")
-            c3.metric("Usuarios recuperados", len(best.get("won_over", [])))
-        st.markdown("</div>", unsafe_allow_html=True)
+        c2.metric("Con este mensaje", f"{winner['avg_final']:+.2f}", f"{winner['delta']:+.2f}")
+        c3.metric("Usuarios recuperados", len(winner.get("won_over", [])))
+        if winner.get("won_over"):
+            st.success("🎯 Recupera a: **" + ", ".join(winner["won_over"]) + "**")
 
         st.markdown("#### Comparación de mensajes (A/B simulado)")
         rows = [{"Mensaje": "— status quo —", "Sentimiento": round(base_avg, 2),
@@ -181,9 +191,11 @@ with tab_res:
                          "Recupera a": ", ".join(o["won_over"])})
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
-        st.markdown("#### Qué decía cada mensaje")
-        for o in cmp["options"]:
-            st.markdown(f"**{o['name']}** (Δ{o['delta']:+.2f}) — _{o['text']}_")
+        others = [o for o in cmp["options"] if o["name"] != winner["name"]]
+        if others:
+            st.markdown("#### Otros mensajes evaluados")
+            for o in others:
+                st.markdown(f"- **{o['name']}** (Δ{o['delta']:+.2f}) — _{o['text']}_")
     else:
         st.info("No se generaron contrafácticos (revisá la config o las API keys).")
 
